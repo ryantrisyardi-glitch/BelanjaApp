@@ -67,6 +67,9 @@ input:focus,select:focus{border-color:var(--g);box-shadow:0 0 0 3px rgba(29,158,
 .scan-area input[type=file]{position:absolute;inset:0;opacity:0;width:100%;height:100%;cursor:pointer}
 /* Live scan */
 .live-scan-wrap{position:relative;border-radius:var(--rs);overflow:hidden;background:#000;aspect-ratio:4/3;width:100%}
+.live-scan-wrap.refocusing{filter:brightness(0.6)}
+.live-scan-wrap.refocusing::after{content:'🔄';position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:32px;animation:spin 0.8s linear infinite}
+@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
 #live-video{width:100%;height:100%;object-fit:cover;display:block}
 .live-overlay{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none}
 .scan-frame{width:70%;aspect-ratio:1;border:3px solid #fff;border-radius:12px;box-shadow:0 0 0 2000px rgba(0,0,0,.45)}
@@ -247,7 +250,12 @@ input:focus,select:focus{border-color:var(--g);box-shadow:0 0 0 3px rgba(29,158,
         <button class="btn sec sm" onclick="showBcDbModal()" style="flex:0 0 auto">📋 Katalog</button>
       </div>
       <div style="font-size:11px;color:var(--ht);margin-top:6px;text-align:center">
-        Scan otomatis — jika nama ditemukan langsung masuk keranjang · Qty bertambah jika scan ulang
+        Scan otomatis — jika nama ditemukan langsung masuk keranjang · Qty bertambah jika scan ulang<br>
+        Tap layar kamera jika buram untuk fokus ulang
+      </div>
+      <div style="margin-top:10px">
+        <label style="font-size:11px;color:var(--mt)">Barcode terakhir terbaca</label>
+        <input type="text" id="live-last-code" readonly placeholder="Belum ada barcode terbaca" style="width:100%;margin-top:4px" onclick="this.select()">
       </div>
     </div>
 
@@ -260,6 +268,10 @@ input:focus,select:focus{border-color:var(--g);box-shadow:0 0 0 3px rgba(29,158,
     <div class="modal-field">
       <label>Nama produk</label>
       <input type="text" id="inp-name" placeholder="Nama produk" onkeydown="if(event.key==='Enter')document.getElementById('inp-price').focus()"/>
+    </div>
+    <div class="modal-field">
+      <label>Barcode <span style="font-weight:400;color:var(--ht)">(kosongkan jika input manual tanpa scan)</span></label>
+      <input type="text" id="inp-bc" placeholder="Belum ada barcode — hasil scan tampil di sini" oninput="document.getElementById('inp-name').dataset.bc=this.value.trim()"/>
     </div>
     <div class="row3" style="margin-bottom:10px">
       <div>
@@ -837,25 +849,49 @@ async function liveLoop(){
   liveAnimFrame=requestAnimationFrame(liveLoop);
 }
 
-function refocusLiveCamera(){
-  /* Tap layar untuk memaksa kamera fokus ulang, berguna di HP yang
-     tidak mendukung continuous autofocus lewat constraint */
-  if(!liveStream) return;
+let refocusInProgress=false;
+async function refocusLiveCamera(){
+  /* Tap layar untuk fokus ulang. API focusMode/focusDistance TIDAK didukung
+     di banyak HP & browser (mis. Safari iOS), jadi trik yang lebih andal
+     lintas-perangkat adalah restart singkat stream kamera — kebanyakan
+     kamera native melakukan re-autofocus setiap kali track baru dibuka. */
+  if(!liveStream || refocusInProgress) return;
+  refocusInProgress=true;
+  const statusEl=document.getElementById('live-status');
+  const wrap=document.getElementById('live-wrap');
+  wrap.classList.add('refocusing');
+  statusEl.textContent='🔄 Fokus ulang…';
   const track=liveStream.getVideoTracks()[0];
-  if(!track) return;
-  try{
-    const caps=track.getCapabilities?track.getCapabilities():{};
-    if(caps.focusMode){
-      /* trik: singleshot lalu balik ke continuous supaya kamera re-fokus */
-      if(caps.focusMode.includes('single-shot')){
-        track.applyConstraints({advanced:[{focusMode:'single-shot'}]})
-          .then(()=>setTimeout(()=>{
-            if(caps.focusMode.includes('continuous')) track.applyConstraints({advanced:[{focusMode:'continuous'}]}).catch(()=>{});
-          },400))
-          .catch(()=>{});
+
+  /* Coba dulu lewat applyConstraints (murah, tanpa kedip) kalau didukung */
+  let appliedSoft=false;
+  if(track){
+    try{
+      const caps=track.getCapabilities?track.getCapabilities():{};
+      if(caps.focusMode&&caps.focusMode.includes('single-shot')){
+        await track.applyConstraints({advanced:[{focusMode:'single-shot'}]});
+        appliedSoft=true;
+        setTimeout(()=>{
+          if(caps.focusMode.includes('continuous')) track.applyConstraints({advanced:[{focusMode:'continuous'}]}).catch(()=>{});
+        },500);
       }
-    }
-  }catch(e){/* diabaikan jika tidak didukung */}
+    }catch(e){appliedSoft=false;}
+  }
+
+  /* Fallback yang selalu jalan: matikan & nyalakan ulang stream kamera */
+  if(!appliedSoft){
+    try{
+      liveStream.getTracks().forEach(t=>t.stop());
+      liveStream=await navigator.mediaDevices.getUserMedia({
+        video:{facingMode:'environment',width:{ideal:1920},height:{ideal:1080}}
+      });
+      const video=document.getElementById('live-video');
+      video.srcObject=liveStream;
+      await video.play();
+    }catch(e){statusEl.textContent='⚠️ Gagal fokus ulang: '+e.message;}
+  }
+
+  setTimeout(()=>{wrap.classList.remove('refocusing');if(liveActive)statusEl.textContent='Arahkan kamera ke barcode…';refocusInProgress=false;},600);
 }
 
 function stopLiveScan(){
@@ -908,8 +944,15 @@ async function onBarcode(code, source){
     if(source==='live') liveStatusEl.textContent=msg;
     else { statusEl.style.color=color||'var(--g)'; statusEl.textContent=msg; }
   };
+  /* Tampilkan barcode yang baru dibaca, apa pun hasilnya */
+  if(source==='live'){
+    const lc=document.getElementById('live-last-code');
+    if(lc) lc.value=code;
+  } else {
+    document.getElementById('inp-bc').value=code;
+  }
 
-  /* Barcode sudah ada di keranjang? Tambah qty */
+  /* Barcode sudah ada di keranjang? Tambah qty (cek dulu sebelum katalog/online) */
   const ex=items.findIndex(it=>it.bc===code);
   if(ex>=0){
     items[ex].qty++; save(); render();
@@ -939,8 +982,18 @@ async function onBarcode(code, source){
 
   /* Lookup online */
   if(!navigator.onLine){
-    setStatus('📴 Offline & tidak ada di katalog — isi manual','var(--am)');
-    if(source!=='live') fillForm('',0,0,'','keluarga',code);
+    if(source==='live'){
+      /* Offline & tak dikenal: tetap simpan ke keranjang & katalog pakai kode sebagai nama sementara,
+         supaya barcode baru ini tidak hilang begitu saja */
+      items.push({name:'Barcode '+code,price:0,nota:0,bc:code,qty:1,checked:false,cat:'',forMember:'keluarga'});
+      saveBcEntry(code,'Barcode '+code,0,0,'','keluarga');
+      save(); render();
+      setStatus('📴 Offline — ditambah sementara sbg "Barcode '+code+'", edit nama di keranjang');
+      toast('🛒 Barcode '+code+' ditambahkan (edit nama di keranjang)');
+    } else {
+      setStatus('📴 Offline & tidak ada di katalog — isi manual','var(--am)');
+      fillForm('',0,0,'','keluarga',code);
+    }
     return;
   }
 
@@ -959,7 +1012,14 @@ async function onBarcode(code, source){
     }
   } else {
     if(source==='live'){
-      setStatus('⚠️ '+code+' tidak dikenal — isi nama di form bawah');
+      /* Tidak dikenal di server maupun riwayat: tetap simpan ke keranjang & katalog
+         memakai kode barcode sebagai nama sementara, supaya scan tidak sia-sia
+         dan lain kali barcode yang sama langsung dikenali dari katalog lokal */
+      items.push({name:'Barcode '+code,price:0,nota:0,bc:code,qty:1,checked:false,cat:'',forMember:'keluarga'});
+      saveBcEntry(code,'Barcode '+code,0,0,'','keluarga');
+      save(); render();
+      setStatus('⚠️ '+code+' tidak dikenal — ditambah sementara, edit nama di keranjang');
+      toast('🛒 Barcode '+code+' ditambahkan (edit nama di keranjang)');
     } else {
       fillForm('',0,0,'','keluarga',code);
       setStatus('⚠️ Tidak ditemukan di semua database — isi manual','var(--am)');
@@ -971,6 +1031,7 @@ function fillForm(name,price,nota,cat,forMember,bc){
   const ne=document.getElementById('inp-name');
   ne.value=name; ne.placeholder=name?'Nama produk':'Nama produk untuk: '+bc;
   if(bc) ne.dataset.bc=bc; else delete ne.dataset.bc;
+  document.getElementById('inp-bc').value=bc||'';
   document.getElementById('inp-price').value=price||'';
   document.getElementById('inp-nota').value=nota||'';
   selCat=cat||''; selFor=forMember||'keluarga';
@@ -985,14 +1046,17 @@ function addItem(){
   const price=parseFloat(document.getElementById('inp-price').value)||0;
   const nota=parseFloat(document.getElementById('inp-nota').value)||0;
   const qty=Math.max(1,parseInt(document.getElementById('inp-qty').value)||1);
-  const bc=ne.dataset.bc||'';
+  const bc=(document.getElementById('inp-bc').value||ne.dataset.bc||'').trim();
   if(!name){ne.focus();toast('⚠️ Nama produk wajib diisi');return;}
   const ex=bc?items.findIndex(it=>it.bc===bc):-1;
   if(ex>=0){ items[ex].qty+=qty; items[ex].cat=selCat||items[ex].cat; items[ex].forMember=selFor||items[ex].forMember; }
   else items.push({name,price,nota,bc,qty,checked:false,cat:selCat||'',forMember:selFor||'keluarga'});
+  /* Simpan ke katalog lokal walau barcode ini baru / tidak dikenali server & riwayat,
+     supaya lain kali scan yang sama langsung dikenali */
   if(bc) saveBcEntry(bc,name,price,nota,selCat,selFor);
   save(); render();
   ne.value=''; ne.placeholder='Nama produk'; delete ne.dataset.bc;
+  document.getElementById('inp-bc').value='';
   document.getElementById('inp-price').value='';
   document.getElementById('inp-nota').value='';
   document.getElementById('inp-qty').value='1';
