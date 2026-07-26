@@ -982,18 +982,11 @@ async function onBarcode(code, source){
 
   /* Lookup online */
   if(!navigator.onLine){
-    if(source==='live'){
-      /* Offline & tak dikenal: tetap simpan ke keranjang & katalog pakai kode sebagai nama sementara,
-         supaya barcode baru ini tidak hilang begitu saja */
-      items.push({name:'Barcode '+code,price:0,nota:0,bc:code,qty:1,checked:false,cat:'',forMember:'keluarga'});
-      saveBcEntry(code,'Barcode '+code,0,0,'','keluarga');
-      save(); render();
-      setStatus('📴 Offline — ditambah sementara sbg "Barcode '+code+'", edit nama di keranjang');
-      toast('🛒 Barcode '+code+' ditambahkan (edit nama di keranjang)');
-    } else {
-      setStatus('📴 Offline & tidak ada di katalog — isi manual','var(--am)');
-      fillForm('',0,0,'','keluarga',code);
-    }
+    /* Tidak dikenal & offline: JANGAN langsung masuk keranjang.
+       Isi ke form manual di bawah dulu — user lengkapi nama/harga, baru simpan lewat tombol Tambah. */
+    fillForm('',0,0,'','keluarga',code);
+    if(source==='live') setStatus('📴 Offline — barcode belum dikenal, isi & tambah lewat form di bawah');
+    else setStatus('📴 Offline & tidak ada di katalog — isi manual','var(--am)');
     return;
   }
 
@@ -1011,19 +1004,13 @@ async function onBarcode(code, source){
       setStatus('✅ Ditemukan: '+found.name+' — isi harga di bawah','var(--g)');
     }
   } else {
-    if(source==='live'){
-      /* Tidak dikenal di server maupun riwayat: tetap simpan ke keranjang & katalog
-         memakai kode barcode sebagai nama sementara, supaya scan tidak sia-sia
-         dan lain kali barcode yang sama langsung dikenali dari katalog lokal */
-      items.push({name:'Barcode '+code,price:0,nota:0,bc:code,qty:1,checked:false,cat:'',forMember:'keluarga'});
-      saveBcEntry(code,'Barcode '+code,0,0,'','keluarga');
-      save(); render();
-      setStatus('⚠️ '+code+' tidak dikenal — ditambah sementara, edit nama di keranjang');
-      toast('🛒 Barcode '+code+' ditambahkan (edit nama di keranjang)');
-    } else {
-      fillForm('',0,0,'','keluarga',code);
-      setStatus('⚠️ Tidak ditemukan di semua database — isi manual','var(--am)');
-    }
+    /* Tidak dikenal di server, katalog, maupun keranjang: JANGAN langsung masuk keranjang.
+       Isi ke form manual di bawah — user lengkapi nama, harga, kategori dulu.
+       Begitu klik "+ Tambah ke Keranjang", addItem() akan menyimpannya ke katalog lokal
+       lewat saveBcEntry(), jadi lain kali scan yang sama langsung dikenali. */
+    fillForm('',0,0,'','keluarga',code);
+    if(source==='live') setStatus('⚠️ '+code+' tidak dikenal — isi nama & harga di form bawah, lalu tambah ke keranjang');
+    else setStatus('⚠️ Tidak ditemukan di semua database — isi manual','var(--am)');
   }
 }
 
@@ -1036,7 +1023,13 @@ function fillForm(name,price,nota,cat,forMember,bc){
   document.getElementById('inp-nota').value=nota||'';
   selCat=cat||''; selFor=forMember||'keluarga';
   initInputChips();
-  if(!name) ne.focus(); else document.getElementById('inp-price').focus();
+  if(!name){
+    ne.focus();
+    /* Pastikan form terlihat — di mode semi-auto kamera ada di atas & bisa menutupi form ini */
+    ne.closest('.card')?.scrollIntoView({behavior:'smooth',block:'center'});
+  } else {
+    document.getElementById('inp-price').focus();
+  }
 }
 
 /* ============================================================ ADD ITEM ============================================================ */
