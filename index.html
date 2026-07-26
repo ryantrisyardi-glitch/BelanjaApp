@@ -233,7 +233,7 @@ input:focus,select:focus{border-color:var(--g);box-shadow:0 0 0 3px rgba(29,158,
 
     <!-- Live / Semi-Auto mode -->
     <div id="scan-live" style="display:none">
-      <div class="live-scan-wrap" id="live-wrap">
+      <div class="live-scan-wrap" id="live-wrap" onclick="refocusLiveCamera()">
         <video id="live-video" autoplay playsinline muted></video>
         <div class="live-overlay">
           <div class="scan-frame"></div>
@@ -730,6 +730,7 @@ async function lookupBarcode(code){
 
 /* ============================================================ SCAN — MANUAL ============================================================ */
 async function handleScan(e){
+  unlockBeep();
   const file=e.target.files[0]; if(!file) return;
   const statusEl=document.getElementById('scan-status');
   statusEl.textContent='🔍 Memproses gambar...'; statusEl.style.color='var(--mt)';
@@ -757,6 +758,7 @@ let liveActive=false, liveStream=null, liveAnimFrame=null, liveBcDetector=null, 
 const SCAN_COOLDOWN=2000; /* ms antar scan kode yang sama */
 
 function setScanMode(mode){
+  unlockBeep();
   document.getElementById('mode-manual-btn').classList.toggle('act',mode==='manual');
   document.getElementById('mode-live-btn').classList.toggle('act',mode==='live');
   document.getElementById('scan-manual').style.display=mode==='manual'?'block':'none';
@@ -775,11 +777,34 @@ async function startLiveScan(){
   }
   try{
     liveStream=await navigator.mediaDevices.getUserMedia({
-      video:{facingMode:'environment',width:{ideal:1280},height:{ideal:720}}
+      video:{
+        facingMode:'environment',
+        width:{ideal:1920},
+        height:{ideal:1080},
+        /* minta kamera fokus dekat & terus-menerus, sama seperti mode manual */
+        focusMode:'continuous',
+        advanced:[{focusMode:'continuous'}]
+      }
     });
     const video=document.getElementById('live-video');
     video.srcObject=liveStream;
     await video.play();
+
+    /* Sebagian browser hanya menerima constraint fokus lewat applyConstraints
+       setelah track aktif, bukan lewat getUserMedia langsung — coba dua-duanya. */
+    const track=liveStream.getVideoTracks()[0];
+    try{
+      const caps=track.getCapabilities?track.getCapabilities():{};
+      if(caps.focusMode && caps.focusMode.includes('continuous')){
+        await track.applyConstraints({advanced:[{focusMode:'continuous'}]});
+      }
+      if(caps.focusDistance){
+        /* fokuskan dekat, cocok untuk baca barcode di jarak dekat */
+        const min=caps.focusDistance.min??0;
+        await track.applyConstraints({advanced:[{focusDistance:min}]}).catch(()=>{});
+      }
+    }catch(e){/* tidak semua device/browser mendukung, aman diabaikan */}
+
     liveBcDetector=new BarcodeDetector({formats:['ean_13','ean_8','code_128','code_39','upc_a','upc_e']});
     liveActive=true;
     document.getElementById('live-badge').textContent='● LIVE';
@@ -812,6 +837,27 @@ async function liveLoop(){
   liveAnimFrame=requestAnimationFrame(liveLoop);
 }
 
+function refocusLiveCamera(){
+  /* Tap layar untuk memaksa kamera fokus ulang, berguna di HP yang
+     tidak mendukung continuous autofocus lewat constraint */
+  if(!liveStream) return;
+  const track=liveStream.getVideoTracks()[0];
+  if(!track) return;
+  try{
+    const caps=track.getCapabilities?track.getCapabilities():{};
+    if(caps.focusMode){
+      /* trik: singleshot lalu balik ke continuous supaya kamera re-fokus */
+      if(caps.focusMode.includes('single-shot')){
+        track.applyConstraints({advanced:[{focusMode:'single-shot'}]})
+          .then(()=>setTimeout(()=>{
+            if(caps.focusMode.includes('continuous')) track.applyConstraints({advanced:[{focusMode:'continuous'}]}).catch(()=>{});
+          },400))
+          .catch(()=>{});
+      }
+    }
+  }catch(e){/* diabaikan jika tidak didukung */}
+}
+
 function stopLiveScan(){
   liveActive=false;
   if(liveAnimFrame){cancelAnimationFrame(liveAnimFrame);liveAnimFrame=null;}
@@ -824,6 +870,17 @@ function stopLiveScan(){
 
 /* ============================================================ BEEP SCANNER ============================================================ */
 let _beepCtx=null;
+function unlockBeep(){
+  /* Harus dipanggil langsung dari user gesture (klik/tap) supaya browser
+     mengizinkan AudioContext berbunyi nanti walau dipicu dari kode async. */
+  try{
+    if(!_beepCtx) _beepCtx=new (window.AudioContext||window.webkitAudioContext)();
+    if(_beepCtx.state==='suspended') _beepCtx.resume();
+  }catch(e){/* ignore */}
+}
+/* Jaga-jaga: buka audio di sentuhan pertama apa pun di halaman */
+['click','touchstart'].forEach(ev=>document.addEventListener(ev,unlockBeep,{once:true,passive:true}));
+
 function playBeep(){
   try{
     if(!_beepCtx) _beepCtx=new (window.AudioContext||window.webkitAudioContext)();
