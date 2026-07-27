@@ -172,6 +172,7 @@ input:focus,select:focus{border-color:var(--g);box-shadow:0 0 0 3px rgba(29,158,
 <div class="nav">
   <button class="nav-btn act" id="navbtn-belanja" onclick="goPage('belanja')">🛒<br>Belanja</button>
   <button class="nav-btn" id="navbtn-ringkasan" onclick="goPage('ringkasan')">📊<br>Ringkasan</button>
+  <button class="nav-btn" id="navbtn-analisa" onclick="goPage('analisa')">📈<br>Analisa</button>
   <button class="nav-btn" id="navbtn-history" onclick="goPage('history')">🕓<br>Riwayat</button>
   <button class="nav-btn" id="navbtn-settings" onclick="goPage('settings')">⚙️<br>Setelan</button>
 </div>
@@ -337,6 +338,53 @@ input:focus,select:focus{border-color:var(--g);box-shadow:0 0 0 3px rgba(29,158,
       <div class="sec-title" style="margin:0"><span class="sec-title-left">📋 Daftar Belanja</span></div>
     </div>
     <div id="check-list"><div class="empty"><div class="empty-ico">📋</div>Belum ada barang</div></div>
+  </div>
+</div>
+
+<!-- ===== PAGE: ANALISA ===== -->
+<div class="page" id="page-analisa">
+  <div class="card card-pad" style="margin-bottom:12px">
+    <div class="sec-title" style="margin:0 0 8px"><span class="sec-title-left">📅 Periode</span></div>
+    <div class="chip-wrap" id="an-period-chips">
+      <span class="chip sel" data-p="30" onclick="setAnPeriod('30')">30 hari</span>
+      <span class="chip" data-p="90" onclick="setAnPeriod('90')">90 hari</span>
+      <span class="chip" data-p="365" onclick="setAnPeriod('365')">1 tahun</span>
+      <span class="chip" data-p="all" onclick="setAnPeriod('all')">Semua</span>
+    </div>
+  </div>
+
+  <div id="an-empty" class="card"><div class="empty"><div class="empty-ico">📈</div>Belum ada riwayat untuk dianalisa</div></div>
+
+  <div id="an-content" style="display:none">
+    <div class="sum-strip" style="margin-bottom:12px">
+      <div class="sum-row"><span style="color:var(--mt)">Jumlah sesi belanja</span><span id="an-sesi">0</span></div>
+      <div class="sum-row"><span style="color:var(--mt)">Total pengeluaran</span><span id="an-total">Rp 0</span></div>
+      <div class="sum-row"><span style="color:var(--mt)">Rata-rata / sesi</span><span id="an-avg">Rp 0</span></div>
+      <div class="sum-row sum-total"><span>Rata-rata / hari</span><span id="an-avgday">Rp 0</span></div>
+    </div>
+
+    <div class="card" style="margin-bottom:12px">
+      <div style="padding:14px;border-bottom:1px solid var(--bdr)"><div class="sec-title" style="margin:0"><span class="sec-title-left">💡 Insight</span></div></div>
+      <div id="an-insight" style="padding:14px;display:flex;flex-direction:column;gap:8px;font-size:13px"></div>
+    </div>
+
+    <div class="card" style="margin-bottom:12px">
+      <div style="padding:14px;border-bottom:1px solid var(--bdr)"><div class="sec-title" style="margin:0"><span class="sec-title-left">🏷️ Per Kategori</span></div></div>
+      <div id="an-cat" style="padding:14px;display:flex;flex-direction:column;gap:10px"></div>
+    </div>
+
+    <div class="card" style="margin-bottom:12px">
+      <div style="padding:14px;border-bottom:1px solid var(--bdr)"><div class="sec-title" style="margin:0"><span class="sec-title-left">📆 Tren Bulanan</span></div></div>
+      <div id="an-month" style="padding:14px;display:flex;flex-direction:column;gap:10px"></div>
+    </div>
+
+    <div class="card">
+      <div style="padding:14px;border-bottom:1px solid var(--bdr)">
+        <div class="sec-title" style="margin:0 0 8px"><span class="sec-title-left">💲 Perbandingan Harga per Barang</span></div>
+        <input type="text" id="an-search" placeholder="Cari nama barang…" oninput="renderAnalisa()">
+      </div>
+      <div id="an-items"></div>
+    </div>
   </div>
 </div>
 
@@ -596,6 +644,7 @@ function goPage(id){
   if(id==='ringkasan') renderChecklist();
   if(id==='history')   renderHistory();
   if(id==='settings')  renderSettings();
+  if(id==='analisa')   renderAnalisa();
   if(id==='belanja')   renderFilterBar();
 }
 
@@ -1323,6 +1372,204 @@ function clearHistory(){
   if(!history.length) return;
   confirm2('🗑 Hapus Semua Riwayat','Semua '+history.length+' sesi akan dihapus permanen. Tidak bisa dikembalikan.','Hapus Semua','dan',()=>{history=[];saveHist();renderHistory();toast('🗑 Semua riwayat dihapus');});
 }
+
+/* ============================================================ ANALISA ============================================================ */
+let anPeriod='30';
+function setAnPeriod(p){
+  anPeriod=p;
+  document.querySelectorAll('#an-period-chips .chip').forEach(c=>c.classList.toggle('sel',c.dataset.p===p));
+  renderAnalisa();
+}
+function anKey(it){ return it.bc ? 'bc:'+it.bc : 'nm:'+(it.name||'').trim().toLowerCase(); }
+
+function renderAnalisa(){
+  const emptyEl=document.getElementById('an-empty'), contEl=document.getElementById('an-content');
+  if(!history.length){ emptyEl.style.display='block'; contEl.style.display='none'; return; }
+
+  const now=Date.now();
+  const cutoff = anPeriod==='all' ? 0 : now-parseInt(anPeriod)*86400000;
+  const sessions = history.filter(h=>(h.id||0)>=cutoff).slice().sort((a,b)=>(a.id||0)-(b.id||0));
+
+  if(!sessions.length){ emptyEl.style.display='block'; emptyEl.innerHTML='<div class="empty"><div class="empty-ico">📈</div>Belum ada riwayat di periode ini</div>'; contEl.style.display='none'; return; }
+  emptyEl.style.display='none'; contEl.style.display='block';
+
+  const total = sessions.reduce((s,h)=>s+(h.total||0),0);
+  const spanDays = anPeriod==='all' ? Math.max(1,Math.round((now-(sessions[0].id||now))/86400000)||1) : parseInt(anPeriod);
+
+  document.getElementById('an-sesi').textContent=sessions.length;
+  document.getElementById('an-total').textContent=fmt(total);
+  document.getElementById('an-avg').textContent=fmt(total/sessions.length);
+  document.getElementById('an-avgday').textContent=fmt(total/spanDays);
+
+  /* ---------- Per kategori ---------- */
+  const catMap={};
+  sessions.forEach(h=>h.items.forEach(it=>{
+    const c=it.cat||'lainnya';
+    catMap[c]=(catMap[c]||0)+(it.price||0)*(it.qty||1);
+  }));
+  const catArr=Object.entries(catMap).sort((a,b)=>b[1]-a[1]);
+  const catEl=document.getElementById('an-cat');
+  if(!catArr.length){ catEl.innerHTML='<div style="color:var(--mt);font-size:13px">Belum ada data kategori</div>'; }
+  else{
+    const maxCat=catArr[0][1];
+    catEl.innerHTML=catArr.map(([c,v])=>{
+      const label = c==='lainnya' ? '🗂️ Lainnya' : catLabel(c);
+      const pct = total?((v/total)*100):0;
+      const w = maxCat? (v/maxCat*100) : 0;
+      return `<div>
+        <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px">
+          <span>${label}</span><span style="color:var(--mt)">${fmt(v)} · ${pct.toFixed(0)}%</span>
+        </div>
+        <div style="height:8px;border-radius:99px;background:var(--bg2,var(--bg))">
+          <div style="height:100%;border-radius:99px;background:var(--g);width:${w}%"></div>
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  /* ---------- Tren bulanan ---------- */
+  const monMap={};
+  sessions.forEach(h=>{
+    const d=new Date(h.id||Date.now());
+    const key=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
+    monMap[key]=(monMap[key]||0)+(h.total||0);
+  });
+  const monKeys=Object.keys(monMap).sort();
+  const monEl=document.getElementById('an-month');
+  if(monKeys.length<1){ monEl.innerHTML='<div style="color:var(--mt);font-size:13px">Belum cukup data</div>'; }
+  else{
+    const maxMon=Math.max(...monKeys.map(k=>monMap[k]));
+    const MONTH_ID=['Jan','Feb','Mar','Apr','Mei','Jun','Jul','Agu','Sep','Okt','Nov','Des'];
+    monEl.innerHTML=monKeys.map((k,i)=>{
+      const [y,m]=k.split('-'); const v=monMap[k];
+      const w=maxMon?(v/maxMon*100):0;
+      const prev=i>0?monMap[monKeys[i-1]]:null;
+      let trend='';
+      if(prev!=null && prev>0){
+        const diff=((v-prev)/prev*100);
+        trend = diff>=0 ? `<span style="color:var(--dg,#d33)">▲ ${diff.toFixed(0)}%</span>` : `<span style="color:var(--g)">▼ ${Math.abs(diff).toFixed(0)}%</span>`;
+      }
+      return `<div>
+        <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px">
+          <span>${MONTH_ID[parseInt(m)-1]} ${y}</span><span style="color:var(--mt)">${fmt(v)} ${trend}</span>
+        </div>
+        <div style="height:8px;border-radius:99px;background:var(--bg2,var(--bg))">
+          <div style="height:100%;border-radius:99px;background:var(--gd,var(--g));width:${w}%"></div>
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  /* ---------- Insight ---------- */
+  const insightEl=document.getElementById('an-insight');
+  const insights=[];
+  if(catArr.length){
+    const [topCat,topVal]=catArr[0];
+    const label = topCat==='lainnya' ? 'Lainnya' : catLabel(topCat);
+    insights.push(`🏆 Pengeluaran terbesar ada di kategori <b>${label}</b> (${fmt(topVal)}, ${((topVal/total)*100).toFixed(0)}% dari total)`);
+  }
+  /* barang paling sering dibeli */
+  const freqMap={};
+  sessions.forEach(h=>h.items.forEach(it=>{
+    const k=anKey(it);
+    if(!freqMap[k]) freqMap[k]={name:it.name,count:0,qty:0};
+    freqMap[k].count++; freqMap[k].qty+=(it.qty||1);
+  }));
+  const freqArr=Object.values(freqMap).sort((a,b)=>b.count-a.count);
+  if(freqArr.length) insights.push(`🔁 Barang paling sering dibeli: <b>${esc(freqArr[0].name)}</b> (${freqArr[0].count}x, total ${freqArr[0].qty} unit)`);
+
+  /* kenaikan harga terbesar */
+  const priceHistMap={};
+  sessions.forEach(h=>h.items.forEach(it=>{
+    const k=anKey(it); if(!it.price) return;
+    if(!priceHistMap[k]) priceHistMap[k]={name:it.name,pts:[]};
+    priceHistMap[k].pts.push({date:h.id,price:it.price});
+  }));
+  let biggestHike=null;
+  Object.values(priceHistMap).forEach(g=>{
+    if(g.pts.length<2) return;
+    g.pts.sort((a,b)=>a.date-b.date);
+    const first=g.pts[0].price, last=g.pts[g.pts.length-1].price;
+    if(first<=0) return;
+    const diffPct=(last-first)/first*100;
+    if(!biggestHike || diffPct>biggestHike.diffPct) biggestHike={name:g.name,diffPct,first,last};
+  });
+  if(biggestHike && biggestHike.diffPct>0.5){
+    insights.push(`📈 <b>${esc(biggestHike.name)}</b> naik ${biggestHike.diffPct.toFixed(0)}% (dari ${fmt(biggestHike.first)} jadi ${fmt(biggestHike.last)})`);
+  }
+  let biggestDrop=null;
+  Object.values(priceHistMap).forEach(g=>{
+    if(g.pts.length<2) return;
+    const first=g.pts[0].price, last=g.pts[g.pts.length-1].price;
+    if(first<=0) return;
+    const diffPct=(last-first)/first*100;
+    if(!biggestDrop || diffPct<biggestDrop.diffPct) biggestDrop={name:g.name,diffPct,first,last};
+  });
+  if(biggestDrop && biggestDrop.diffPct<-0.5){
+    insights.push(`📉 <b>${esc(biggestDrop.name)}</b> turun ${Math.abs(biggestDrop.diffPct).toFixed(0)}% (dari ${fmt(biggestDrop.first)} jadi ${fmt(biggestDrop.last)})`);
+  }
+  /* pengeluaran per anggota (selain umum keluarga) */
+  const memMap={};
+  sessions.forEach(h=>h.items.forEach(it=>{
+    const m=it.forMember||'keluarga';
+    memMap[m]=(memMap[m]||0)+(it.price||0)*(it.qty||1);
+  }));
+  const memArr=Object.entries(memMap).sort((a,b)=>b[1]-a[1]);
+  if(memArr.length>1){
+    insights.push(`👤 Pengeluaran tertinggi per anggota: <b>${esc(memberLabel(memArr[0][0]))}</b> (${fmt(memArr[0][1])})`);
+  }
+  /* tren rata-rata belanja per sesi: bandingkan separuh awal vs akhir periode */
+  if(sessions.length>=4){
+    const half=Math.floor(sessions.length/2);
+    const avgFirst=sessions.slice(0,half).reduce((s,h)=>s+(h.total||0),0)/half;
+    const avgLast=sessions.slice(half).reduce((s,h)=>s+(h.total||0),0)/(sessions.length-half);
+    if(avgFirst>0){
+      const d=(avgLast-avgFirst)/avgFirst*100;
+      if(Math.abs(d)>5){
+        insights.push(d>0? `📊 Rata-rata belanja per sesi cenderung <b>naik ${d.toFixed(0)}%</b> dibanding awal periode` : `📊 Rata-rata belanja per sesi cenderung <b>turun ${Math.abs(d).toFixed(0)}%</b> dibanding awal periode`);
+      }
+    }
+  }
+  insightEl.innerHTML = insights.length ? insights.map(t=>`<div>${t}</div>`).join('') : '<div style="color:var(--mt)">Belum cukup data untuk insight</div>';
+
+  /* ---------- Perbandingan harga per barang ---------- */
+  const q=(document.getElementById('an-search').value||'').trim().toLowerCase();
+  const itemsEl=document.getElementById('an-items');
+  const groups=Object.values(priceHistMap).filter(g=>!q||g.name.toLowerCase().includes(q));
+  groups.sort((a,b)=>b.pts.length-a.pts.length);
+  if(!groups.length){
+    itemsEl.innerHTML='<div class="empty"><div class="empty-ico">💲</div>'+(q?'Tidak ada barang cocok':'Belum ada data harga')+'</div>';
+  } else {
+    itemsEl.innerHTML=groups.map(g=>{
+      const prices=g.pts.map(p=>p.price);
+      const min=Math.min(...prices), max=Math.max(...prices), avg=prices.reduce((a,b)=>a+b,0)/prices.length;
+      const last=g.pts[g.pts.length-1].price;
+      const prevPrice=g.pts.length>1?g.pts[g.pts.length-2].price:null;
+      let trendBadge='';
+      if(prevPrice!=null && prevPrice!==last){
+        trendBadge = last>prevPrice
+          ? `<span style="color:var(--dg,#d33);font-size:12px">▲ naik dari ${fmt(prevPrice)}</span>`
+          : `<span style="color:var(--g);font-size:12px">▼ turun dari ${fmt(prevPrice)}</span>`;
+      }
+      const histRows=g.pts.slice().reverse().slice(0,5).map(p=>
+        `<div style="display:flex;justify-content:space-between;font-size:12px;color:var(--mt);padding:2px 0">
+          <span>${new Date(p.date).toLocaleDateString('id-ID',{day:'numeric',month:'short',year:'numeric'})}</span><span>${fmt(p.price)}</span>
+        </div>`).join('');
+      return `<div style="padding:12px 14px;border-bottom:1px solid var(--bdr)">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+          <span style="font-weight:600;font-size:13px">${esc(g.name)}</span>
+          <span style="font-weight:700;font-size:13px">${fmt(last)}</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--mt);margin-bottom:6px">
+          <span>Termurah ${fmt(min)} · Termahal ${fmt(max)} · Rata-rata ${fmt(avg)}</span>
+          ${trendBadge}
+        </div>
+        <details><summary style="font-size:12px;color:var(--g);cursor:pointer">Riwayat harga (${g.pts.length}x)</summary>${histRows}</details>
+      </div>`;
+    }).join('');
+  }
+}
+
 function closeHModal(e){if(e&&e.target!==document.getElementById('hmodal'))return;document.getElementById('hmodal').style.display='none';}
 
 /* ============================================================ NOTA MODAL ============================================================ */

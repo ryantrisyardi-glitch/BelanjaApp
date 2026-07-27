@@ -1,4 +1,4 @@
-const CACHE = 'belanja-v7';
+const CACHE = 'belanja-v8';
 
 // Deteksi base path otomatis dari lokasi sw.js
 const BASE = self.location.pathname.replace('/sw.js', '');
