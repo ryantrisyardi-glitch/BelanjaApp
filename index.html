@@ -179,6 +179,26 @@ input:focus,select:focus{border-color:var(--g);box-shadow:0 0 0 3px rgba(29,158,
 
 <div class="toast" id="toast"></div>
 
+<!-- DATE PICKER for saving history -->
+<div class="cfm-bg" id="date-modal" style="display:none">
+  <div class="cfm-box">
+    <div class="cfm-title">📅 Tanggal Belanja</div>
+    <div class="cfm-msg" style="margin-bottom:10px">Pilih tanggal & jam belanja ini (default: sekarang)</div>
+    <div class="modal-field">
+      <label>Tanggal</label>
+      <input type="date" id="date-modal-date">
+    </div>
+    <div class="modal-field" style="margin-top:8px">
+      <label>Jam</label>
+      <input type="time" id="date-modal-time">
+    </div>
+    <div class="cfm-btns" style="margin-top:14px">
+      <button class="btn sec" style="flex:1" onclick="closeDateModal()">Batal</button>
+      <button class="btn pri" style="flex:1" id="date-modal-ok">💾 Simpan</button>
+    </div>
+  </div>
+</div>
+
 <!-- CONFIRM -->
 <div class="cfm-bg" id="cfm" style="display:none">
   <div class="cfm-box">
@@ -311,7 +331,7 @@ input:focus,select:focus{border-color:var(--g);box-shadow:0 0 0 3px rgba(29,158,
   </div>
 
   <div class="row2" style="margin-bottom:8px">
-    <button class="btn pri" onclick="saveHistory()">💾 Simpan Riwayat</button>
+    <button class="btn pri" onclick="openSaveHistoryModal()">💾 Simpan Riwayat</button>
     <button class="btn sec" onclick="newSession()">🆕 Sesi Baru</button>
   </div>
   <button class="btn sec" onclick="shareCurrent()" style="margin-bottom:12px">📤 Bagikan Keranjang</button>
@@ -345,11 +365,22 @@ input:focus,select:focus{border-color:var(--g);box-shadow:0 0 0 3px rgba(29,158,
 <div class="page" id="page-analisa">
   <div class="card card-pad" style="margin-bottom:12px">
     <div class="sec-title" style="margin:0 0 8px"><span class="sec-title-left">📅 Periode</span></div>
-    <div class="chip-wrap" id="an-period-chips">
-      <span class="chip sel" data-p="30" onclick="setAnPeriod('30')">30 hari</span>
-      <span class="chip" data-p="90" onclick="setAnPeriod('90')">90 hari</span>
-      <span class="chip" data-p="365" onclick="setAnPeriod('365')">1 tahun</span>
-      <span class="chip" data-p="all" onclick="setAnPeriod('all')">Semua</span>
+    <div style="display:flex;gap:8px">
+      <div class="modal-field" style="flex:1">
+        <label>Dari tanggal</label>
+        <input type="date" id="an-date-from" onchange="renderAnalisa()">
+      </div>
+      <div class="modal-field" style="flex:1">
+        <label>Sampai tanggal</label>
+        <input type="date" id="an-date-to" onchange="renderAnalisa()">
+      </div>
+    </div>
+    <div class="chip-wrap" style="margin-top:8px">
+      <span class="chip" onclick="setAnPreset(7)">7 hari</span>
+      <span class="chip" onclick="setAnPreset(30)">30 hari</span>
+      <span class="chip" onclick="setAnPreset(90)">90 hari</span>
+      <span class="chip" onclick="setAnPreset(365)">1 tahun</span>
+      <span class="chip" onclick="setAnPresetAll()">Semua</span>
     </div>
   </div>
 
@@ -1295,15 +1326,34 @@ function newSession(){
   if(!items.length){toast('🆕 Keranjang sudah kosong');return;}
   confirm2('Mulai Sesi Baru?','Keranjang saat ini ('+items.length+' produk) belum disimpan dan akan dihapus. Gunakan "Simpan Riwayat" dulu jika mau disimpan.','Ya, kosongkan','dan',()=>{items=[];save();render();toast('🆕 Sesi baru dimulai');});
 }
-function saveHistory(silent){
+function saveHistoryCore(customDate,silent){
   if(!items.length){if(!silent)toast('⚠️ Keranjang masih kosong');return false;}
   const total=items.reduce((s,it)=>s+it.price*it.qty,0);
   const nota=items.reduce((s,it)=>s+(it.nota||it.price)*it.qty,0);
-  history.unshift({id:Date.now(),date:new Date().toLocaleDateString('id-ID',{weekday:'short',day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}),items:JSON.parse(JSON.stringify(items)),total,nota,budget:parseFloat(document.getElementById('budget').value)||0});
+  const d=customDate||new Date();
+  history.unshift({id:d.getTime(),date:d.toLocaleDateString('id-ID',{weekday:'short',day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}),items:JSON.parse(JSON.stringify(items)),total,nota,budget:parseFloat(document.getElementById('budget').value)||0});
   saveHist(); items=[]; save(); render();
   if(!silent) toast('💾 Tersimpan! Keranjang siap sesi baru');
   return true;
 }
+function saveHistory(silent){ return saveHistoryCore(null,silent); }
+
+function openSaveHistoryModal(){
+  if(!items.length){toast('⚠️ Keranjang masih kosong');return;}
+  const now=new Date();
+  const pad=n=>String(n).padStart(2,'0');
+  document.getElementById('date-modal-date').value=now.getFullYear()+'-'+pad(now.getMonth()+1)+'-'+pad(now.getDate());
+  document.getElementById('date-modal-time').value=pad(now.getHours())+':'+pad(now.getMinutes());
+  document.getElementById('date-modal').style.display='flex';
+  document.getElementById('date-modal-ok').onclick=()=>{
+    const dv=document.getElementById('date-modal-date').value;
+    const tv=document.getElementById('date-modal-time').value||'00:00';
+    const chosen = dv ? new Date(dv+'T'+tv+':00') : new Date();
+    closeDateModal();
+    saveHistoryCore(chosen,false);
+  };
+}
+function closeDateModal(){ document.getElementById('date-modal').style.display='none'; }
 
 /* ============================================================ HISTORY ============================================================ */
 function renderHistory(){
@@ -1374,27 +1424,52 @@ function clearHistory(){
 }
 
 /* ============================================================ ANALISA ============================================================ */
-let anPeriod='30';
-function setAnPeriod(p){
-  anPeriod=p;
-  document.querySelectorAll('#an-period-chips .chip').forEach(c=>c.classList.toggle('sel',c.dataset.p===p));
+let anInited=false;
+function setAnPreset(days){
+  const to=new Date(); const from=new Date(); from.setDate(from.getDate()-days);
+  const pad=n=>String(n).padStart(2,'0');
+  const fmtD=d=>d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());
+  document.getElementById('an-date-from').value=fmtD(from);
+  document.getElementById('an-date-to').value=fmtD(to);
+  renderAnalisa();
+}
+function setAnPresetAll(){
+  if(!history.length) return;
+  const oldest=history.reduce((m,h)=>Math.min(m,h.id||Date.now()),Date.now());
+  const pad=n=>String(n).padStart(2,'0');
+  const fmtD=d=>d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());
+  document.getElementById('an-date-from').value=fmtD(new Date(oldest));
+  document.getElementById('an-date-to').value=fmtD(new Date());
   renderAnalisa();
 }
 function anKey(it){ return it.bc ? 'bc:'+it.bc : 'nm:'+(it.name||'').trim().toLowerCase(); }
 
 function renderAnalisa(){
   const emptyEl=document.getElementById('an-empty'), contEl=document.getElementById('an-content');
-  if(!history.length){ emptyEl.style.display='block'; contEl.style.display='none'; return; }
+  if(!history.length){ emptyEl.style.display='block'; emptyEl.innerHTML='<div class="empty"><div class="empty-ico">📈</div>Belum ada riwayat untuk dianalisa</div>'; contEl.style.display='none'; return; }
 
-  const now=Date.now();
-  const cutoff = anPeriod==='all' ? 0 : now-parseInt(anPeriod)*86400000;
-  const sessions = history.filter(h=>(h.id||0)>=cutoff).slice().sort((a,b)=>(a.id||0)-(b.id||0));
+  /* Default rentang tanggal: 30 hari terakhir, hanya diisi sekali saat pertama buka tab */
+  if(!anInited){
+    anInited=true;
+    const pad=n=>String(n).padStart(2,'0');
+    const fmtD=d=>d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());
+    const to=new Date(); const from=new Date(); from.setDate(from.getDate()-30);
+    document.getElementById('an-date-from').value=fmtD(from);
+    document.getElementById('an-date-to').value=fmtD(to);
+  }
 
-  if(!sessions.length){ emptyEl.style.display='block'; emptyEl.innerHTML='<div class="empty"><div class="empty-ico">📈</div>Belum ada riwayat di periode ini</div>'; contEl.style.display='none'; return; }
+  const fromVal=document.getElementById('an-date-from').value;
+  const toVal=document.getElementById('an-date-to').value;
+  const cutoffStart = fromVal ? new Date(fromVal+'T00:00:00').getTime() : 0;
+  const cutoffEnd   = toVal   ? new Date(toVal+'T23:59:59').getTime()   : Date.now();
+
+  const sessions = history.filter(h=>(h.id||0)>=cutoffStart && (h.id||0)<=cutoffEnd).slice().sort((a,b)=>(a.id||0)-(b.id||0));
+
+  if(!sessions.length){ emptyEl.style.display='block'; emptyEl.innerHTML='<div class="empty"><div class="empty-ico">📈</div>Belum ada riwayat di rentang tanggal ini</div>'; contEl.style.display='none'; return; }
   emptyEl.style.display='none'; contEl.style.display='block';
 
   const total = sessions.reduce((s,h)=>s+(h.total||0),0);
-  const spanDays = anPeriod==='all' ? Math.max(1,Math.round((now-(sessions[0].id||now))/86400000)||1) : parseInt(anPeriod);
+  const spanDays = Math.max(1, Math.round((cutoffEnd-cutoffStart)/86400000));
 
   document.getElementById('an-sesi').textContent=sessions.length;
   document.getElementById('an-total').textContent=fmt(total);
@@ -1536,7 +1611,15 @@ function renderAnalisa(){
   const q=(document.getElementById('an-search').value||'').trim().toLowerCase();
   const itemsEl=document.getElementById('an-items');
   const groups=Object.values(priceHistMap).filter(g=>!q||g.name.toLowerCase().includes(q));
-  groups.sort((a,b)=>b.pts.length-a.pts.length);
+  groups.forEach(g=>{
+    g.pts.sort((a,b)=>a.date-b.date);
+    const first=g.pts[0].price, last=g.pts[g.pts.length-1].price;
+    g._diffPct = (g.pts.length>=2 && first>0) ? (last-first)/first*100 : null;
+  });
+  const ups   = groups.filter(g=>g._diffPct!=null && g._diffPct>0.05).sort((a,b)=>b._diffPct-a._diffPct);
+  const downs = groups.filter(g=>g._diffPct!=null && g._diffPct<-0.05).sort((a,b)=>a._diffPct-b._diffPct);
+  const flat  = groups.filter(g=>g._diffPct==null || Math.abs(g._diffPct)<=0.05).sort((a,b)=>b.pts.length-a.pts.length);
+  groups.length=0; groups.push(...ups,...downs,...flat);
   if(!groups.length){
     itemsEl.innerHTML='<div class="empty"><div class="empty-ico">💲</div>'+(q?'Tidak ada barang cocok':'Belum ada data harga')+'</div>';
   } else {
@@ -1545,6 +1628,12 @@ function renderAnalisa(){
       const min=Math.min(...prices), max=Math.max(...prices), avg=prices.reduce((a,b)=>a+b,0)/prices.length;
       const last=g.pts[g.pts.length-1].price;
       const prevPrice=g.pts.length>1?g.pts[g.pts.length-2].price:null;
+      let overallBadge='';
+      if(g._diffPct!=null){
+        overallBadge = g._diffPct>0
+          ? `<span style="color:var(--dg,#d33);font-weight:600">▲ ${g._diffPct.toFixed(0)}% sejak awal</span>`
+          : (g._diffPct<0 ? `<span style="color:var(--g);font-weight:600">▼ ${Math.abs(g._diffPct).toFixed(0)}% sejak awal</span>` : `<span style="color:var(--mt)">Stabil</span>`);
+      }
       let trendBadge='';
       if(prevPrice!=null && prevPrice!==last){
         trendBadge = last>prevPrice
@@ -1556,10 +1645,11 @@ function renderAnalisa(){
           <span>${new Date(p.date).toLocaleDateString('id-ID',{day:'numeric',month:'short',year:'numeric'})}</span><span>${fmt(p.price)}</span>
         </div>`).join('');
       return `<div style="padding:12px 14px;border-bottom:1px solid var(--bdr)">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px">
           <span style="font-weight:600;font-size:13px">${esc(g.name)}</span>
           <span style="font-weight:700;font-size:13px">${fmt(last)}</span>
         </div>
+        <div style="font-size:11px;margin-bottom:4px">${overallBadge}</div>
         <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--mt);margin-bottom:6px">
           <span>Termurah ${fmt(min)} · Termahal ${fmt(max)} · Rata-rata ${fmt(avg)}</span>
           ${trendBadge}
