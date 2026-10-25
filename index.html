@@ -175,6 +175,7 @@ input:focus,select:focus{border-color:var(--g);box-shadow:0 0 0 3px rgba(29,158,
   <button class="nav-btn" id="navbtn-analisa" onclick="goPage('analisa')">📈<br>Analisa</button>
   <button class="nav-btn" id="navbtn-history" onclick="goPage('history')">🕓<br>Riwayat</button>
   <button class="nav-btn" id="navbtn-settings" onclick="goPage('settings')">⚙️<br>Setelan</button>
+  <button class="nav-btn" id="navbtn-keuangan" onclick="location.href=kkUrl()">💰<br>Keuangan</button>
 </div>
 
 <div class="toast" id="toast"></div>
@@ -442,6 +443,8 @@ input:focus,select:focus{border-color:var(--g);box-shadow:0 0 0 3px rgba(29,158,
 <!-- ===== PAGE: SETTINGS ===== -->
 <div class="page" id="page-settings">
 
+  <div class="card card-pad" id="kk-card"></div>
+
   <!-- Anggota Keluarga -->
   <div class="card card-pad">
     <div class="sec-title">
@@ -641,7 +644,7 @@ let cats    = loadCats();
 let members = loadMembers();
 
 function save()     { localStorage.setItem('bl_items', JSON.stringify(items)); }
-function saveHist() { localStorage.setItem('bl_hist',  JSON.stringify(history)); }
+function saveHist() { localStorage.setItem('bl_hist',  JSON.stringify(history)); if(typeof kkQueue==='function')kkQueue(); }
 function fmt(n)  { return 'Rp ' + Math.round(n).toLocaleString('id-ID'); }
 function esc(s)  { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 function uid()   { return Date.now().toString(36)+Math.random().toString(36).slice(2,6); }
@@ -674,7 +677,7 @@ function goPage(id){
   document.getElementById('navbtn-'+id).classList.add('act');
   if(id==='ringkasan') renderChecklist();
   if(id==='history')   renderHistory();
-  if(id==='settings')  renderSettings();
+  if(id==='settings'){renderSettings();if(typeof kkRender==='function')kkRender();}
   if(id==='analisa')   renderAnalisa();
   if(id==='belanja')   renderFilterBar();
 }
@@ -1880,5 +1883,69 @@ window.addEventListener('load',()=>{
   render();
 });
 </script>
+<!-- ===== INTEGRASI PENGELOLAAN KEUANGAN (Firebase) ===== -->
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script>
+const KK_FB={apiKey:"AIzaSyB-_61gfIXUF2fdT9cu6DNWr1Za8deROm0",authDomain:"pengelolaan-keuangan-keluarga.firebaseapp.com",projectId:"pengelolaan-keuangan-keluarga",storageBucket:"pengelolaan-keuangan-keluarga.firebasestorage.app",messagingSenderId:"105255482155",appId:"1:105255482155:web:e0ac0ecb8b5a6fd94acb6e"};
+/* GANTI jika alamat aplikasi keuangan berbeda. Normalnya terisi otomatis setelah aplikasi keuangan pernah dibuka di browser ini. */
+const KK_URL_DEFAULT='https://ryantrisyardi-glitch.github.io/pengelolaan-keuangan-keluarga/';
+const kkUrl=()=>localStorage.getItem('kk_url')||KK_URL_DEFAULT;
+let kkAuth=null,kkDb=null,kkUser=null,kkDbs=[],kkBusy=false,kkT;
+const kkOK=()=>typeof firebase!=='undefined';
+const kkFid=()=>localStorage.getItem('bl_kk_fid')||'';
+const kkSentKey=()=>'bl_kk_sent_'+kkFid();
+const kkSent=()=>{try{return JSON.parse(localStorage.getItem(kkSentKey())||'{}')}catch{return{}}};
+const kkP2=n=>String(n).padStart(2,'0');
+function kkHash(h){const s=JSON.stringify([h.id,(h.items||[]).map(i=>[i.name,i.qty,i.price,i.cat])]);let x=5381;for(let i=0;i<s.length;i++)x=((x<<5)+x+s.charCodeAt(i))|0;return(x>>>0).toString(36)}
+function kkDoc(h){const d=new Date(h.id),by={};
+  h.items.forEach(i=>{const c=i.cat||'',ct=cats.find(x=>x.id==c),g=by[c]=by[c]||{c,cn:ct?ct.name:'Tanpa kategori',emoji:ct?ct.emoji:'',amt:0,n:0};g.amt+=Math.round((i.price||0)*(i.qty||1));g.n++});
+  return{id:String(h.id),date:d.getFullYear()+'-'+kkP2(d.getMonth()+1)+'-'+kkP2(d.getDate()),tm:kkP2(d.getHours())+':'+kkP2(d.getMinutes()),ts:h.id,
+    total:Math.round(h.items.reduce((s,i)=>s+(i.price||0)*(i.qty||1),0)),
+    items:h.items.map(i=>({n:i.name||'',q:i.qty||1,p:i.price||0,c:i.cat||'',m:i.forMember||'keluarga'})),
+    by:Object.values(by),rev:kkHash(h),src:'belanja'}}
+function kkInit(){if(!kkOK()||kkAuth)return;
+  try{firebase.initializeApp(KK_FB);kkAuth=firebase.auth();kkDb=firebase.firestore();
+    kkAuth.onAuthStateChanged(async u=>{kkUser=u;kkDbs=[];
+      if(u&&navigator.onLine){try{const s=await kkDb.collection('families').where('uids','array-contains',u.uid).get();
+        kkDbs=s.docs.map(d=>({fid:d.id,name:d.data().name,role:(d.data().members[u.uid]||{}).role}));
+        if(!kkDbs.find(x=>x.fid==kkFid())){const last=localStorage.getItem('last_'+u.uid),pick=kkDbs.find(x=>x.fid==last&&x.role!='viewer')||kkDbs.find(x=>x.role!='viewer')||kkDbs[0];if(pick)localStorage.setItem('bl_kk_fid',pick.fid)}
+      }catch(e){console.warn(e)}}
+      kkRender();kkQueue()})}catch(e){console.warn(e)}}
+function kkQueue(){clearTimeout(kkT);kkT=setTimeout(()=>kkSync(false),1500)}
+async function kkSync(manual){
+  if(!kkOK()){if(manual)toast('Fitur sinkron belum termuat (butuh internet)');return}
+  kkInit();
+  if(kkBusy)return;
+  if(!kkUser||!kkFid()){if(manual)toast('Masuk dulu dan pilih database keluarga');return}
+  if(!navigator.onLine){if(manual)toast('Sedang offline, akan dikirim saat online');return}
+  if(!manual&&localStorage.getItem('bl_kk_auto')==='0')return;
+  const d0=kkDbs.find(x=>x.fid==kkFid());if(d0&&d0.role=='viewer'){if(manual)toast('Peran viewer tidak bisa mengirim data');return}
+  kkBusy=true;const sent=kkSent();let n=0;
+  try{for(const h of history){if(!h.items||!h.items.length)continue;const hs=kkHash(h);if(sent[h.id]===hs)continue;
+      await kkDb.collection('families').doc(kkFid()).collection('belanja').doc(String(h.id)).set(kkDoc(h));
+      sent[h.id]=hs;n++;localStorage.setItem(kkSentKey(),JSON.stringify(sent))}
+    if(manual)toast(n?'✅ '+n+' belanja dikirim ke Keuangan':'Semua riwayat sudah terkirim')}
+  catch(e){console.warn(e);if(manual)toast('Gagal kirim: '+(e.code||e.message))}
+  kkBusy=false;kkRender()}
+async function kkLogin(){kkInit();if(!kkAuth)return toast('Butuh internet untuk masuk');const pr=new firebase.auth.GoogleAuthProvider();
+  try{await kkAuth.signInWithPopup(pr)}catch(e){if(/popup-blocked|operation-not-supported/.test(e.code||''))return kkAuth.signInWithRedirect(pr);if(!/popup-closed|cancelled/.test(e.code||''))toast('Gagal masuk: '+(e.code||e.message))}}
+function kkRender(){const el=document.getElementById('kk-card');if(!el)return;
+  const sent=kkSent(),pend=history.filter(h=>h.items&&h.items.length&&sent[h.id]!==kkHash(h)).length;let b;
+  if(!kkOK())b='<div class="setting-sub">Fitur sinkron belum termuat. Buka sekali saat online agar tersimpan.</div>';
+  else if(!kkUser)b='<div class="setting-sub" style="margin-bottom:10px">Masuk dengan akun yang sama seperti di Pengelolaan Keuangan. Jika sudah masuk di sana pada browser ini, muat ulang halaman ini dan Anda otomatis masuk.</div><button class="btn pri" onclick="kkLogin()">Masuk dengan Google</button>';
+  else b=`<div class="setting-sub" style="margin-bottom:8px">Masuk sebagai ${esc(kkUser.email)}</div>
+    <label>Database keluarga tujuan</label>
+    <select onchange="localStorage.setItem('bl_kk_fid',this.value);kkRender();kkQueue()">${kkDbs.map(d=>`<option value="${d.fid}" ${d.fid==kkFid()?'selected':''}>${esc(d.name)}${d.role=='viewer'?' (viewer, tidak bisa kirim)':''}</option>`).join('')||'<option>Belum ada database</option>'}</select>
+    <label style="display:flex;gap:8px;align-items:center;margin-top:10px;font-size:13px;color:var(--tx)"><input type="checkbox" style="width:auto" ${localStorage.getItem('bl_kk_auto')!=='0'?'checked':''} onchange="localStorage.setItem('bl_kk_auto',this.checked?'1':'0');if(this.checked)kkQueue()"> Kirim otomatis saat riwayat disimpan</label>
+    <div class="setting-sub" style="margin:8px 0">${pend?pend+' riwayat belum terkirim':'Semua riwayat sudah terkirim'}</div>
+    <button class="btn pri" onclick="kkSync(true)">🔄 Kirim sekarang</button>
+    <button class="btn xs sec" style="margin-top:8px" onclick="kkAuth.signOut()">Keluar</button>`;
+  el.innerHTML=`<div class="sec-title"><span class="sec-title-left">💰 Pengelolaan Keuangan</span></div>${b}<button class="btn sec" style="margin-top:10px" onclick="location.href=kkUrl()">Buka Pengelolaan Keuangan →</button>`}
+kkInit();
+addEventListener('online',()=>{kkInit();kkQueue()});
+</script>
+
 </body>
 </html>

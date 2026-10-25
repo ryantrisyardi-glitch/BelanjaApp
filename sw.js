@@ -1,4 +1,4 @@
-const CACHE = 'belanja-v9';
+const CACHE = 'belanja-v10';
 
 // Deteksi base path otomatis dari lokasi sw.js
 const BASE = self.location.pathname.replace('/sw.js', '');
@@ -33,6 +33,9 @@ self.addEventListener('activate', e => {
 self.addEventListener('fetch', e => {
   // Hanya handle GET request
   if (e.request.method !== 'GET') return;
+  // Lewati API Firebase/Google (jaringan langsung); hanya cache file aplikasi + SDK Firebase (gstatic)
+  const u = new URL(e.request.url);
+  if (u.origin !== self.location.origin && !/gstatic\.com$/.test(u.hostname)) return;
 
   e.respondWith(
     caches.match(e.request).then(cached => {
@@ -40,7 +43,7 @@ self.addEventListener('fetch', e => {
       return fetch(e.request)
         .then(response => {
           // Cache response baru yang valid
-          if (response && response.status === 200 && response.type === 'basic') {
+          if (response && ((response.status === 200 && response.type === 'basic') || response.type === 'opaque')) {
             const clone = response.clone();
             caches.open(CACHE).then(c => c.put(e.request, clone));
           }
