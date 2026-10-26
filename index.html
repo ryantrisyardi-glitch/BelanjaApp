@@ -1924,7 +1924,7 @@ async function kkSync(manual){
   const d0=kkDbs.find(x=>x.fid==kkFid());if(d0&&d0.role=='viewer'){if(manual)toast('Peran viewer tidak bisa mengirim data');return}
   kkBusy=true;const sent=kkSent();let n=0;
   try{for(const h of history){if(!h.items||!h.items.length)continue;const hs=kkHash(h);if(sent[h.id]===hs)continue;
-      await kkDb.collection('families').doc(kkFid()).collection('belanja').doc(String(h.id)).set(kkDoc(h));
+      await kkDb.collection('families').doc(kkFid()).collection('belanja').doc(String(h.id)).set({...kkDoc(h),st:firebase.firestore.FieldValue.serverTimestamp()});
       sent[h.id]=hs;n++;localStorage.setItem(kkSentKey(),JSON.stringify(sent))}
     if(manual)toast(n?'✅ '+n+' belanja dikirim ke Keuangan':'Semua riwayat sudah terkirim')}
   catch(e){console.warn(e);if(manual)toast('Gagal kirim: '+(e.code||e.message))}
